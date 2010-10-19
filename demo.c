@@ -13,7 +13,7 @@
 #define BPP 4
 #define GRID_SIZE 2
 #define RADIUS 0.2
-#define TARGET_US 100000
+#define TARGET_US 16666 /* 16.6 ms / frame = 60 fps */
 
 typedef struct light {
     f4 location;
@@ -43,18 +43,12 @@ typedef struct graphics_state {
     int *worker_pixel_ranges;
     sem_t sema_start_render;
     sem_t sema_finish_render;
-
-    /* framebuffers */
-    Uint32 *buffers;
-    int buffer_count, buffer_write_ix, buffer_read_ix;
-    sem_t sema_buffer_created, sema_buffer_consumed;
 } graphics_state;
 
-void set_buffer_pixel(graphics_state *state, int x, int y, Uint8 r, Uint8 g, Uint8 b)
+void set_pixel(graphics_state *state, int x, int ytimesw, Uint8 r, Uint8 g, Uint8 b)
 {
     Uint32 colour = SDL_MapRGB( state->screen->format, r, g, b );
-    Uint32 *buffer = state->buffers + state->buffer_write_ix*state->width*state->height;
-    buffer[x + y*state->width] = colour;
+    ((Uint32*)state->screen->pixels)[x + ytimesw] = colour;
 }
 
 f3 expose(f3 incident, float e){
@@ -70,23 +64,64 @@ typedef struct graphics_worker_arg {
     graphics_state *state;
 } graphics_worker_arg;
 
-float trace(const ray *ray, const graphics_state *state, f3 *light, int max_depth){
-    f3 specular = (f3){0.4f, 0.4f, 0.4f};
-    f3 diffuse = (f3){1,1,0.2f};
-
+float intersect(const ray *ray, const graphics_state *state, f3 *intersection, f3 *normal){
     /* main raytrace loop: go through geometry, testing for intersections */
-    *light = (f3){0, 0, 0};
     int i;
+    float tmin = 1000000;
     for(i = 0; i < state->object_count; i++){
         /* get geometry */
         sphere *s = state->object_list + i;
-        f3 intersection, normal;
-        float t = intersect_sphere(ray, s, 100000, &intersection, &normal);
-        if(t < 0)
-            continue;
+        float t = intersect_sphere(ray, s, tmin, intersection, normal);
+        if(t > 0 && t < tmin)
+            tmin = t;
+    }
+    return (tmin < 100000) ? tmin : -1;
+}
+float trace(const ray *ray, const graphics_state *state, f3 *light, int max_depth){
+    *light = (f3){0,0,0};
+    f3 intersection, normal;
+    float t = intersect(ray, state, &intersection, &normal);
+    if(t < 0)
+        return -1;
 
-        /* shade; no shadows for now */
-        *light = (f3){0,0,0};
+    /* shade; no shadows for now */
+    f3 specular = (f3){0.4f, 0.4f, 0.4f};
+    f3 diffuse = (f3){1,1,0.2f};
+    int j;
+    for(j = 0; j < state->light_count; j++){
+        f4 light_location = state->lights[j].location;
+        f3 light_direction = (f3){
+            light_location.x - intersection.x*light_location.w,
+            light_location.y - intersection.y*light_location.w,
+            light_location.z - intersection.z*light_location.w};
+        /* shadows -- these are slow.
+        struct ray light_ray;
+        light_ray.start = intersection;
+        light_ray.direction = light_direction;
+        f3 tmp_intersect, tmp_normal; 
+        if(intersect(&light_ray, state, &tmp_intersect, &tmp_normal) > 0)
+            continue;*/
+        float cos_incident = dot3(&normal, &light_direction) / norm3(&light_direction);
+        if(cos_incident < 0)
+            cos_incident = 0;
+        cos_incident += 0.04f;
+        light->x += diffuse.x*cos_incident*state->lights[j].color.x;
+        light->y += diffuse.y*cos_incident*state->lights[j].color.y;
+        light->z += diffuse.z*cos_incident*state->lights[j].color.z;
+    }
+
+    /* recurse to get specular reflection */
+    if(max_depth > 0){
+        float bounce = dot3(&ray->direction, &normal);
+        struct ray newRay;
+        newRay.direction = (f3){
+            ray->direction.x - 2*bounce*normal.x,
+            ray->direction.y - 2*bounce*normal.y,
+            ray->direction.z - 2*bounce*normal.z};
+        newRay.start = intersection;
+        f3 newLight;
+        trace(&newRay, state, &newLight, max_depth-1);
+        /* special case: specular highlights */
         int j;
         for(j = 0; j < state->light_count; j++){
             f4 light_location = state->lights[j].location;
@@ -94,53 +129,21 @@ float trace(const ray *ray, const graphics_state *state, f3 *light, int max_dept
                 light_location.x - intersection.x*light_location.w,
                 light_location.y - intersection.y*light_location.w,
                 light_location.z - intersection.z*light_location.w};
-            normalize3(&light_direction);
-            float cos_incident = dot3(&normal, &light_direction);
-            if(cos_incident < 0)
-                cos_incident = 0;
-            cos_incident += 0.04f;
-            light->x += diffuse.x*cos_incident*state->lights[j].color.x;
-            light->y += diffuse.y*cos_incident*state->lights[j].color.y;
-            light->z += diffuse.z*cos_incident*state->lights[j].color.z;
-        }
-
-        /* recurse to get specular reflection */
-        if(max_depth > 0){
-            float bounce = dot3(&ray->direction, &normal);
-            struct ray newRay;
-            newRay.direction = (f3){
-                ray->direction.x - 2*bounce*normal.x,
-                ray->direction.y - 2*bounce*normal.y,
-                ray->direction.z - 2*bounce*normal.z};
-            newRay.start = intersection;
-            f3 newLight;
-            trace(&newRay, state, &newLight, max_depth-1);
-            /* special case: specular highlights */
-            int j;
-            for(j = 0; j < state->light_count; j++){
-                f4 light_location = state->lights[j].location;
-                f3 light_direction = (f3){
-                    light_location.x - intersection.x*light_location.w,
-                    light_location.y - intersection.y*light_location.w,
-                    light_location.z - intersection.z*light_location.w};
-                float light_cos = dot3(&light_direction, &newRay.direction);
-                float thresh = 0.85;
-                if(light_cos > thresh){
-                    float highlight = (light_cos - thresh)/(1-thresh);
-                    highlight *= highlight * highlight * 3;
-                    newLight.x += highlight*state->lights[j].color.x;
-                    newLight.y += highlight*state->lights[j].color.y;
-                    newLight.z += highlight*state->lights[j].color.z;
-                }
+            float light_cos = dot3(&light_direction, &newRay.direction);
+            float thresh = 0.85;
+            if(light_cos > thresh){
+                float highlight = (light_cos - thresh)/(1-thresh);
+                highlight *= highlight * highlight * 3;
+                newLight.x += highlight*state->lights[j].color.x;
+                newLight.y += highlight*state->lights[j].color.y;
+                newLight.z += highlight*state->lights[j].color.z;
             }
-            light->x += specular.x*newLight.x;
-            light->y += specular.y*newLight.y;
-            light->z += specular.z*newLight.z;
         }
-        return t;
+        light->x += specular.x*newLight.x;
+        light->y += specular.y*newLight.y;
+        light->z += specular.z*newLight.z;
     }
-
-    return -1;
+    return t;
 }
 
 f3 graphics_render_pixel(graphics_state *state, int x, int y){
@@ -184,21 +187,22 @@ void* graphics_worker_thread(graphics_worker_arg *arg){
         int x, y;
         for(y = y0; y < y1; y++) 
         {
+            int ytimesw = y * state->width;
             for(x = x0; x < x1; x++) 
             {
-                if(!state->stencil[x*HEIGHT + y]){
-                    set_buffer_pixel(state, x, y, 0, 0, 0);
+                if(!state->stencil[x + ytimesw]){
+                    set_pixel(state, x, ytimesw, 0, 0, 0);
                     continue;
                 }
 
                 f3 color = graphics_render_pixel(state, x, y);
-                set_buffer_pixel(state, x, y, 
+                set_pixel(state, x, ytimesw, 
                     (Uint8)(color.x*255.9f),
                     (Uint8)(color.y*255.9f),
                     (Uint8)(color.z*255.9f));
             }
         }
-        
+
         /* let the main thread know we're done rendering */
         sem_post(&state->sema_finish_render);
     }
@@ -221,16 +225,28 @@ void add_sphere_to_stencil(sphere *s, graphics_state *state){
     if(y1 >= state->height) y1 = state->height - 1;
 
     int x,y;
-    for(x = x0; x <= x1; x++)
-        for(y = y0; y <= y1; y++)
-            state->stencil[x*state->height + y] = 1;
+    for(y = y0; y <= y1; y++)
+        for(x = x0; x <= x1; x++)
+            state->stencil[x + y*state->width] = 1;
 }
 
-int copy_buffer_to_screen(Uint32 *buffer, SDL_Surface *screen){
+int draw_screen(graphics_state *state){
+    SDL_Surface *screen = state->screen;
     if(SDL_MUSTLOCK(screen) && SDL_LockSurface(screen) < 0) 
         return 1;
-    
-    memcpy(screen->pixels, buffer, screen->w*screen->h*sizeof(Uint32));
+
+    /* calculate stencil buffer, so we don't have to raytrace the whole screen */
+    memset(state->stencil, 0, state->width*state->height*sizeof(int));
+    int i;
+    for(i = 0; i < state->object_count; i++){
+        add_sphere_to_stencil(state->object_list + i, state);
+    }
+
+    /* tell the worker threads to start rendering, then wait for them to finish */
+    for(i = 0; i < state->num_workers; i++)
+        sem_post(&state->sema_start_render);
+    for(i = 0; i < state->num_workers; i++)
+        sem_wait(&state->sema_finish_render);
 
     /* swap buffers */
     if(SDL_MUSTLOCK(screen))
@@ -240,8 +256,8 @@ int copy_buffer_to_screen(Uint32 *buffer, SDL_Surface *screen){
 
 }
 
-long total_ns(struct timespec t){
-    return 1000000000*(long)t.tv_sec + (long)t.tv_nsec;
+long long total_ns(clock_t t){
+    return (long long)1000000000*t/CLOCKS_PER_SEC;
 }
 
 int init_graphics(graphics_state *state){
@@ -255,13 +271,6 @@ int init_graphics(graphics_state *state){
     state->width = WIDTH;
     state->height = HEIGHT;
     state->stencil = malloc(sizeof(int)*state->width*state->height);
-
-    state->buffer_count = 20;
-    state->buffer_read_ix = 0;
-    state->buffer_write_ix = 0;
-    state->buffers = malloc(sizeof(Uint32)*state->width*state->height*state->buffer_count);
-    sem_init(&state->sema_buffer_created,0,0);
-    sem_init(&state->sema_buffer_consumed,0,state->buffer_count);
     return 0;
 }
 
@@ -337,7 +346,7 @@ void timestep(graphics_state *state){
     *((f3*)state->projection_matrix + 3) = (f3) { 
         0, //sinf(h / 30.0f), 
         0,
-        -2}; //-cosf(h / 30.0f)};
+        -4}; //-cosf(h / 30.0f)};
 
     /* so does the light */
     int i;
@@ -380,27 +389,26 @@ void timestep(graphics_state *state){
                 s->center.y - s2->center.y,
                 s->center.z - s2->center.z};
             float dist = norm3(&diff);
-            normalize3(&diff);
             if(dist < s->radius + s2->radius){
+                normalize3(&diff);
                 float dot = dot3(&diff, &s->velocity);
+                if(dot > 0)
+                    /* if they're already flying apart,
+                     * don't bounce them back towards each other */
+                    continue;
                 float dot2 = dot3(&diff, &s2->velocity);
-                s->velocity.x  -= 2*diff.x*dot;
-                s->velocity.y  -= 2*diff.y*dot;
-                s->velocity.z  -= 2*diff.z*dot;
-                s2->velocity.x -= 2*diff.x*dot2;
-                s2->velocity.y -= 2*diff.y*dot2;
-                s2->velocity.z -= 2*diff.z*dot2;
+                s->velocity.x  -= diff.x*(dot - dot2);
+                s->velocity.y  -= diff.y*(dot - dot2);
+                s->velocity.z  -= diff.z*(dot - dot2);
+                s2->velocity.x -= diff.x*(dot2 - dot);
+                s2->velocity.y -= diff.y*(dot2 - dot);
+                s2->velocity.z -= diff.z*(dot2 - dot);
             }
         }
     }
 
     /* z order */
-    /*f3 *eye = (f3*)state->projection_matrix + 3;
-    f3 diff = (f3){
-        s->center.x - eye->x, 
-        s->center.y - eye->y, 
-        s->center.z - eye->z};*/
-    for(i = 0; i < state->object_count; i++){
+    /*for(i = 0; i < state->object_count; i++){
         int min_ix = i;
         float min_z = state->object_list[i].center.z;
         int j;
@@ -416,33 +424,7 @@ void timestep(graphics_state *state){
             state->object_list[i] = state->object_list[min_ix];
             state->object_list[min_ix] = temp;
         }
-    }
-}
-
-void render_buffers(graphics_state *state){
-    printf("render_buffers started\n");
-    while(1){
-        sem_wait(&state->sema_buffer_consumed);
-        //printf("rendering buffer %d\n", state->buffer_write_ix);
-
-        /* calculate stencil buffer, so we don't have to raytrace the whole screen */
-        memset(state->stencil, 0, state->width*state->height*sizeof(int));
-        int i;
-        for(i = 0; i < state->object_count; i++){
-            add_sphere_to_stencil(state->object_list + i, state);
-        }
-
-        /* tell the worker threads to start rendering, then wait for them to finish */
-        for(i = 0; i < state->num_workers; i++)
-            sem_post(&state->sema_start_render);
-        for(i = 0; i < state->num_workers; i++)
-            sem_wait(&state->sema_finish_render);
-
-        state->buffer_write_ix++;
-        if(state->buffer_write_ix == state->buffer_count)
-            state->buffer_write_ix = 0;
-        sem_post(&state->sema_buffer_created);
-    }
+    }*/
 }
 
 int main(int argc, char **argv){
@@ -470,40 +452,24 @@ int main(int argc, char **argv){
     if(init_graphics(&state) != 0) return -1;
     if(init_worker_threads(&state) != 0) return -1;
 
-    /* start render thread */
-    pthread_t render_thread;
-    pthread_create(&render_thread, NULL, (void* (*)(void*))render_buffers, &state);
-
     /* main loop */
     int run = 1;
     float ema_nanos = 0, ema_nanos2 = 0, max_nanos = 0;
+    clock_t start_time = clock();
     while(run){
-        /* performance metrics */
-        state.frame++;
-        struct timespec start_time;
-        clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         /* change the scene */
         timestep(&state);
 
         /* render the scene */
-        /*if(draw_screen(screen, &state)){
+        if(draw_screen(&state)){
             perror("render error");
             return 1;
-        }*/
-        sem_wait(&state.sema_buffer_created);
-        //printf("copying buffer to screen: %d\n", state.buffer_read_ix);
-        copy_buffer_to_screen(
-            state.buffers + state.width*state.height*state.buffer_read_ix, 
-            screen);
-        state.buffer_read_ix++;
-        if(state.buffer_read_ix == state.buffer_count)
-            state.buffer_read_ix = 0;
-        sem_post(&state.sema_buffer_consumed);
+        }
 
         /* performance metrics */
-        struct timespec end_time;
-        clock_gettime(CLOCK_MONOTONIC, &end_time);
+        state.frame++;
+        clock_t end_time = clock();
         long nanos = total_ns(end_time) - total_ns(start_time);
         ema_nanos = 0.9f*ema_nanos + 0.1*nanos;
         ema_nanos2 = 0.9f*ema_nanos2 + 0.1*nanos*nanos;
@@ -517,6 +483,7 @@ int main(int argc, char **argv){
                 fps, fps-fps_sigma, fps_worst);
             max_nanos = 0;
         }
+        start_time = clock();
         int sleep_us = TARGET_US - nanos/1000;
         if(sleep_us > 1000)
             usleep(sleep_us);

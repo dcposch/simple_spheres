@@ -1,5 +1,5 @@
 FILES= demo.c geometry.c
-CFLAGS= -Wall -lSDL
+CFLAGS= -Wall -lSDL -std=gnu99
 
 all: $(FILES)
 	gcc -O3 $(CFLAGS) $(FILES) -o demo
