@@ -256,8 +256,8 @@ int draw_screen(graphics_state *state){
 
 }
 
-long long total_ns(clock_t t){
-    return (long long)1000000000*t/CLOCKS_PER_SEC;
+long long total_ns(const struct timespec *t){
+    return (long long)t->tv_sec*1000000000 + t->tv_nsec;
 }
 
 int init_graphics(graphics_state *state){
@@ -455,7 +455,8 @@ int main(int argc, char **argv){
     /* main loop */
     int run = 1;
     float ema_nanos = 0, ema_nanos2 = 0, max_nanos = 0;
-    clock_t start_time = clock();
+    struct timespec start_time, end_time;
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
     while(run){
 
         /* change the scene */
@@ -469,8 +470,8 @@ int main(int argc, char **argv){
 
         /* performance metrics */
         state.frame++;
-        clock_t end_time = clock();
-        long nanos = total_ns(end_time) - total_ns(start_time);
+        clock_gettime(CLOCK_MONOTONIC, &end_time);
+        long nanos = total_ns(&end_time) - total_ns(&start_time);
         ema_nanos = 0.9f*ema_nanos + 0.1*nanos;
         ema_nanos2 = 0.9f*ema_nanos2 + 0.1*nanos*nanos;
         if(nanos > max_nanos) max_nanos = nanos;
@@ -483,9 +484,9 @@ int main(int argc, char **argv){
                 fps, fps-fps_sigma, fps_worst);
             max_nanos = 0;
         }
-        start_time = clock();
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
         int sleep_us = TARGET_US - nanos/1000;
-        if(sleep_us > 1000)
+        if(sleep_us > 0)
             usleep(sleep_us);
 
         /* check if we need to exit */
