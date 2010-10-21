@@ -163,7 +163,7 @@ f3 graphics_render_pixel(graphics_state *state, int x, int y){
             normalized.y/2, 
             sqrtf(1.0 - (normalized.x*normalized.x + normalized.y*normalized.y)/4) };
         f3 incident_light;
-        trace(&r, state, &incident_light, 2);
+        trace(&r, state, &incident_light, 1);
         avg_light.x += incident_light.x/antialias;
         avg_light.y += incident_light.y/antialias;
         avg_light.z += incident_light.z/antialias;
