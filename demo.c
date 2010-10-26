@@ -1,19 +1,32 @@
 #include <stdlib.h>
-#include <SDL/SDL.h>
 #include <time.h>
 #include <math.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <unistd.h>
+#include <SDL/SDL.h>
 
 #include "geometry.h"
 
+/* screen dimensions to resize to when exiting */
+#define ORIG_WIDTH 1360
+#define ORIG_HEIGHT 920
+
+/* screen dimensions to run at */
 #define WIDTH 640
 #define HEIGHT 480 
 #define BPP 4
+
+/* scene description. for now, just balls that bounce around.
+ * they start out in a grid of N*N*N balls */
 #define GRID_SIZE 2
 #define RADIUS 0.2
+
+/* rendering properties */
 #define TARGET_US 16666 /* 16.6 ms / frame = 60 fps */
+#define ANTIALIASING 4 /* 4 rays per pixel */
+#define NUM_WORKER_THREADS 2 /* increase to 4 on a quad core */
+#define MAX_TRACE_DEPTH 1 /* reflections, but no reflections of reflections */
 
 typedef struct light {
     f4 location;
@@ -111,38 +124,39 @@ float trace(const ray *ray, const graphics_state *state, f3 *light, int max_dept
     }
 
     /* recurse to get specular reflection */
+    float bounce = dot3(&ray->direction, &normal);
+    struct ray newRay;
+    newRay.direction = (f3){
+        ray->direction.x - 2*bounce*normal.x,
+        ray->direction.y - 2*bounce*normal.y,
+        ray->direction.z - 2*bounce*normal.z};
+    f3 newLight = (f3){0,0,0};
     if(max_depth > 0){
-        float bounce = dot3(&ray->direction, &normal);
-        struct ray newRay;
-        newRay.direction = (f3){
-            ray->direction.x - 2*bounce*normal.x,
-            ray->direction.y - 2*bounce*normal.y,
-            ray->direction.z - 2*bounce*normal.z};
         newRay.start = intersection;
-        f3 newLight;
         trace(&newRay, state, &newLight, max_depth-1);
-        /* special case: specular highlights */
-        int j;
-        for(j = 0; j < state->light_count; j++){
-            f4 light_location = state->lights[j].location;
-            f3 light_direction = (f3){
-                light_location.x - intersection.x*light_location.w,
-                light_location.y - intersection.y*light_location.w,
-                light_location.z - intersection.z*light_location.w};
-            float light_cos = dot3(&light_direction, &newRay.direction);
-            float thresh = 0.85;
-            if(light_cos > thresh){
-                float highlight = (light_cos - thresh)/(1-thresh);
-                highlight *= highlight * highlight * 3;
-                newLight.x += highlight*state->lights[j].color.x;
-                newLight.y += highlight*state->lights[j].color.y;
-                newLight.z += highlight*state->lights[j].color.z;
-            }
-        }
-        light->x += specular.x*newLight.x;
-        light->y += specular.y*newLight.y;
-        light->z += specular.z*newLight.z;
     }
+
+    /* special case: specular highlights */
+    for(j = 0; j < state->light_count; j++){
+        f4 light_location = state->lights[j].location;
+        f3 light_direction = (f3){
+            light_location.x - intersection.x*light_location.w,
+            light_location.y - intersection.y*light_location.w,
+            light_location.z - intersection.z*light_location.w};
+        float light_cos = dot3(&light_direction, &newRay.direction);
+        float thresh = 0.85;
+        if(light_cos > thresh){
+            float highlight = (light_cos - thresh)/(1-thresh);
+            highlight *= highlight * highlight * 3;
+            newLight.x += highlight*state->lights[j].color.x;
+            newLight.y += highlight*state->lights[j].color.y;
+            newLight.z += highlight*state->lights[j].color.z;
+        }
+    }
+    light->x += specular.x*newLight.x;
+    light->y += specular.y*newLight.y;
+    light->z += specular.z*newLight.z;
+
     return t;
 }
 
@@ -150,8 +164,7 @@ f3 graphics_render_pixel(graphics_state *state, int x, int y){
     /* antialiasing */
     f3 avg_light = (f3){0,0,0};
     int i;
-    int antialias = 4;
-    for(i = 0; i < antialias; i++){
+    for(i = 0; i < ANTIALIASING; i++){
         f3 normalized = (f3){ 
             (((float)x + (float)(i%2)/4) / state->width)*2-1, 
             1-(((float)y  + (float)(i/2)/4)/ state->height)*2, 
@@ -163,10 +176,10 @@ f3 graphics_render_pixel(graphics_state *state, int x, int y){
             normalized.y/2, 
             sqrtf(1.0 - (normalized.x*normalized.x + normalized.y*normalized.y)/4) };
         f3 incident_light;
-        trace(&r, state, &incident_light, 1);
-        avg_light.x += incident_light.x/antialias;
-        avg_light.y += incident_light.y/antialias;
-        avg_light.z += incident_light.z/antialias;
+        trace(&r, state, &incident_light, MAX_TRACE_DEPTH);
+        avg_light.x += incident_light.x/ANTIALIASING;
+        avg_light.y += incident_light.y/ANTIALIASING;
+        avg_light.z += incident_light.z/ANTIALIASING;
     }
     f3 color = expose(avg_light, 1);
     return color;
@@ -406,25 +419,6 @@ void timestep(graphics_state *state){
             }
         }
     }
-
-    /* z order */
-    /*for(i = 0; i < state->object_count; i++){
-        int min_ix = i;
-        float min_z = state->object_list[i].center.z;
-        int j;
-        for(j = i+1; j < state->object_count; j++){
-            if(state->object_list[j].center.z < min_z){
-                min_z = state->object_list[j].center.z;
-                min_ix = j;
-            }
-        }
-
-        if(i != min_ix){
-            sphere temp = state->object_list[i];
-            state->object_list[i] = state->object_list[min_ix];
-            state->object_list[min_ix] = temp;
-        }
-    }*/
 }
 
 int main(int argc, char **argv){
@@ -436,7 +430,7 @@ int main(int argc, char **argv){
     }
     SDL_ShowCursor(SDL_DISABLE);
     SDL_Surface *screen = 
-        SDL_SetVideoMode(WIDTH, HEIGHT, BPP*8, SDL_FULLSCREEN|SDL_HWSURFACE|SDL_DOUBLEBUF);
+        SDL_SetVideoMode(WIDTH, HEIGHT, BPP*8, SDL_HWSURFACE|SDL_DOUBLEBUF);
     if(!screen)
     {
         perror("could not set video mode");
@@ -493,7 +487,7 @@ int main(int argc, char **argv){
         SDL_Event event;
         while(SDL_PollEvent(&event)) 
         {
-            if(event.type == SDL_QUIT || event.type == SDL_MOUSEBUTTONDOWN){// || event.type == SDL_KEYDOWN){
+            if(event.type == SDL_QUIT || event.type == SDL_MOUSEBUTTONDOWN){
                 run = 0;
                 break;
             }
@@ -501,7 +495,6 @@ int main(int argc, char **argv){
     }
 
     /* reset resolution to normal, exit */
-    SDL_SetVideoMode(1360, 768, 32, SDL_FULLSCREEN|SDL_HWSURFACE|SDL_DOUBLEBUF);
     SDL_Quit();
     return 0;
 }
