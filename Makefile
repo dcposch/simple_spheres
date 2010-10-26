@@ -1,14 +1,19 @@
-FILES= demo.c geometry.c
+CFILES= demo.c geometry.c
 CFLAGS= -Wall -lSDL -std=gnu99
+HASKELLFILES= demo_monad.hs
+HASKELLFLAGS= --make -O2
 
-all: $(FILES)
-	gcc -O3 $(CFLAGS) $(FILES) -o demo
+all: $(CFILES)
+	gcc -O3 $(CFLAGS) $(CFILES) -o demo
 
-debug: $(FILES)
-	gcc -g -O0 $(CFLAGS) $(FILES) -o demo
+debug: $(CFILES)
+	gcc -g -O0 $(CFLAGS) $(CFILES) -o demo
 
-profile: $(FILES)
-	gcc -pg -O3 $(CFLAGS) $(FILES) -o demo 
+profile: $(CFILES)
+	gcc -pg -O3 $(CFLAGS) $(CFILES) -o demo 
+
+monad: $(HASKELLFILES) 
+	ghc $(HASKELLFLAGS) $(HASKELLFILES)
 
 clean:
-	rm -f demo
+	rm -f demo demo_monad.hi demo_monad.o demo_monad

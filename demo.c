@@ -429,6 +429,7 @@ int main(int argc, char **argv){
         return 1;
     }
     SDL_ShowCursor(SDL_DISABLE);
+    SDL_WM_SetCaption("simple raytracer demo", "");
     SDL_Surface *screen = 
         SDL_SetVideoMode(WIDTH, HEIGHT, BPP*8, SDL_HWSURFACE|SDL_DOUBLEBUF);
     if(!screen)
