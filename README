@@ -24,3 +24,25 @@ simple_spheres
     directly on the GPU as a shader. 
     
     Simple_spheres is fairly badass.
+
+
+
+    UPDATED: I've now added a very similar but even more simplified 
+    raytracer in Haskell, for comparison. Haskell is a beautiful
+    language, so it's sad that even with all the voodoo black magic
+    that GHC can work, it is still at least two orders of magnitude
+    slower than C. And that for a simple (a couple hundred lines in 
+    both languages) program that is mostly just math. (In other words,
+    the kind of thing even Java can do reasonably quickly. If I have
+    time, I will in fact port the C code to Java because I'm quite
+    curious now.)
+    
+    Pros:
+    The entire rendering is a single pure function, which is pretty cool.
+    In theory this makes the individual ray casts trivially parallelizable.
+    
+    Cons:
+    Even with the cool parts like antialiasing, collision detection, and
+    multiple lightsources disabled and the trace depth reduced to 1 at
+    320x240 (ie extremely limited settings), roughly 1 FPS.
+
