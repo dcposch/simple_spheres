@@ -14,7 +14,7 @@
 
 /* screen dimensions to run at */
 #define WIDTH 640
-#define HEIGHT 480 
+#define HEIGHT 480
 #define BPP 4
 
 /* scene description. for now, just balls that bounce around.
@@ -25,8 +25,8 @@
 /* rendering properties */
 #define TARGET_US 16666 /* 16.6 ms / frame = 60 fps */
 #define ANTIALIASING 4 /* 4 rays per pixel */
-#define NUM_WORKER_THREADS 2 /* increase to 4 on a quad core */
-#define MAX_TRACE_DEPTH 1 /* reflections, but no reflections of reflections */
+#define NUM_WORKER_THREADS 4 /* increase to 4 on a quad core */
+#define MAX_TRACE_DEPTH 2 /* reflections, but no reflections of reflections */
 
 typedef struct light {
     f4 location;
@@ -327,7 +327,7 @@ int init_model(graphics_state *state){
 int init_worker_threads(graphics_state *state){
     sem_init(&state->sema_start_render,0,0);
     sem_init(&state->sema_finish_render,0,0);
-    state->num_workers = 2;
+    state->num_workers = NUM_WORKER_THREADS;
     state->worker_threads = malloc(sizeof(pthread_t)*state->num_workers);
     state->worker_pixel_ranges = malloc(sizeof(int)*4*state->num_workers);
     graphics_worker_arg *worker_args = malloc(sizeof(graphics_worker_arg)*state->num_workers);
