@@ -1,5 +1,5 @@
 CFILES= demo.c geometry.c
-CFLAGS= -Wall -lSDL -std=gnu99
+CFLAGS= -Wall -lSDL -lrt -std=gnu99
 HASKELLFILES= demo_monad.hs
 HASKELLFLAGS= --make -O2
 
