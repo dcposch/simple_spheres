@@ -57,7 +57,8 @@ multiple lightsources disabled and the trace depth reduced to 1 at
 
 
 
-'''Java'''
+Java
+----
 
 
 Java is much more similar to C than Haskell is, so the Java port is almost line-by-line with a bit of boilerplate added and a bit removed.
