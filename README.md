@@ -1,8 +1,11 @@
 simple_spheres
 ==============
 
-'''A very basic, pretty fast
-multithreaded raytracer written in C.'''
+C
+-
+
+**A very basic, pretty fast
+multithreaded raytracer written in C.**
 
 Just a demo, and I'm using it for performance tests.
 
@@ -25,10 +28,11 @@ directly on the GPU as a shader.
 
 Simple_spheres is fairly badass.
 
-*60 FPS on my machine.*
+**60 FPS** on my machine.
 
 
-'''Haskell'''
+Haskell
+-------
 
 I've now added a very similar but even more simplified 
 raytracer in Haskell, for comparison. Haskell is a beautiful
@@ -49,7 +53,7 @@ Even with the cool parts like antialiasing, collision detection, and
 multiple lightsources disabled and the trace depth reduced to 1 at
 320x240 (ie extremely limited settings), roughly 1 FPS.
 
-*Not enough FPS on my machine.*
+**Not enough FPS** on my machine.
 
 
 
@@ -64,4 +68,4 @@ A few lessons for me:
 - By default, Java's BufferedImage is insanely slow. I had to resort to some almost-but-not-quite portable hacks. This is partly because of "ColorModel", Java likes to do full color-space transformations on every pixel that you set. How many pro photo editing apps are actually written in Java? None. How many Java graphics apps are slow and crappy because of it? Lots.
 - Java doesn't support floats very well. Not only are functions like sqrt and sin not overloaded, but there's no sinf / sqrtf either.
 
-*7 FPS on my machine.*
+**7 FPS** on my machine.
