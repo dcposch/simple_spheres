@@ -1,19 +1,18 @@
+# DC
+# Spring 2012
+
 CFILES= demo.c geometry.c
-CFLAGS= -Wall -lSDL -lrt -std=gnu99
-HASKELLFILES= demo_monad.hs
-HASKELLFLAGS= --make -O2
+SDL_FLAGS= $(shell sdl-config --cflags) $(shell sdl-config --libs) 
+CFLAGS= -Wall -std=c99 $(SDL_FLAGS)
 
 all: $(CFILES)
-	gcc -O3 $(CFLAGS) $(CFILES) -o demo
+	gcc -O3 $(CFILES) $(CFLAGS) -o demo
 
 debug: $(CFILES)
-	gcc -g -O0 $(CFLAGS) $(CFILES) -o demo
+	gcc -g -O0 $(CFILES) $(CFLAGS) -o demo
 
 profile: $(CFILES)
-	gcc -pg -O3 $(CFLAGS) $(CFILES) -o demo 
-
-monad: $(HASKELLFILES) 
-	ghc $(HASKELLFLAGS) $(HASKELLFILES)
+	gcc -pg -O3 $(CFILES) $(CFLAGS) -o demo 
 
 clean:
-	rm -f demo demo_monad.hi demo_monad.o demo_monad
+	rm -f demo 

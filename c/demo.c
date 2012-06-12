@@ -1,11 +1,11 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
-#include <pthread.h>
-#include <semaphore.h>
 #include <unistd.h>
-#include <SDL/SDL.h>
-
+#include <string.h>
+#include <stdio.h>
+#include <assert.h>
+#include <SDL.h>
 #include "geometry.h"
 
 /* screen dimensions to resize to when exiting */
@@ -52,10 +52,10 @@ typedef struct graphics_state {
 
     /* workers */
     int num_workers;
-    pthread_t *worker_threads;
+    SDL_Thread **worker_threads;
     int *worker_pixel_ranges;
-    sem_t sema_start_render;
-    sem_t sema_finish_render;
+    SDL_sem *sema_start_render;
+    SDL_sem *sema_finish_render;
 } graphics_state;
 
 void set_pixel(graphics_state *state, int x, int ytimesw, Uint8 r, Uint8 g, Uint8 b)
@@ -185,8 +185,7 @@ f3 graphics_render_pixel(graphics_state *state, int x, int y){
     return color;
 }
 
-void* graphics_worker_thread(graphics_worker_arg *arg){
-    printf("worker thread %d started\n", arg->i);
+int graphics_worker_thread(graphics_worker_arg *arg){
     graphics_state *state = arg->state;
     int x0 = state->worker_pixel_ranges[4*arg->i];
     int y0 = state->worker_pixel_ranges[4*arg->i + 1];
@@ -195,7 +194,7 @@ void* graphics_worker_thread(graphics_worker_arg *arg){
 
     /* raytrace */
     while(1){
-        sem_wait(&state->sema_start_render);
+        SDL_SemWait(state->sema_start_render);
 
         int x, y;
         for(y = y0; y < y1; y++) 
@@ -217,9 +216,9 @@ void* graphics_worker_thread(graphics_worker_arg *arg){
         }
 
         /* let the main thread know we're done rendering */
-        sem_post(&state->sema_finish_render);
+        SDL_SemPost(state->sema_finish_render);
     }
-    return NULL;
+    return 0;
 }
 
 void add_sphere_to_stencil(sphere *s, graphics_state *state){
@@ -257,9 +256,9 @@ int draw_screen(graphics_state *state){
 
     /* tell the worker threads to start rendering, then wait for them to finish */
     for(i = 0; i < state->num_workers; i++)
-        sem_post(&state->sema_start_render);
+        SDL_SemPost(state->sema_start_render);
     for(i = 0; i < state->num_workers; i++)
-        sem_wait(&state->sema_finish_render);
+        SDL_SemWait(state->sema_finish_render);
 
     /* swap buffers */
     if(SDL_MUSTLOCK(screen))
@@ -267,10 +266,6 @@ int draw_screen(graphics_state *state){
     SDL_Flip(screen); 
     return 0;
 
-}
-
-long long total_ns(const struct timespec *t){
-    return (long long)t->tv_sec*1000000000 + t->tv_nsec;
 }
 
 int init_graphics(graphics_state *state){
@@ -283,13 +278,13 @@ int init_graphics(graphics_state *state){
     memcpy(state->projection_matrix, matrix, sizeof(matrix)); 
     state->width = WIDTH;
     state->height = HEIGHT;
-    state->stencil = malloc(sizeof(int)*state->width*state->height);
+    state->stencil = (int*)malloc(sizeof(int)*state->width*state->height);
     return 0;
 }
 
 int init_lights(graphics_state *state){
     state->light_count = 2;
-    state->lights = malloc(sizeof(light)*state->light_count);
+    state->lights = (light*)malloc(sizeof(light)*state->light_count);
     state->lights[0].color = (f3){1,1,1};
     state->lights[1].color = (f3){0,0,1};
 
@@ -305,7 +300,7 @@ int init_model(graphics_state *state){
     /* fill it with spheres */
     srand(time(NULL));
     state->object_count = GRID_SIZE*GRID_SIZE*GRID_SIZE;
-    state->object_list = malloc(state->object_count*sizeof(sphere));
+    state->object_list = (sphere*)malloc(state->object_count*sizeof(sphere));
     int i,j,k;
     for(i = 0; i < GRID_SIZE; i++){
         for(j = 0; j < GRID_SIZE; j++){
@@ -325,12 +320,17 @@ int init_model(graphics_state *state){
 }
 
 int init_worker_threads(graphics_state *state){
-    sem_init(&state->sema_start_render,0,0);
-    sem_init(&state->sema_finish_render,0,0);
+    state->sema_start_render = SDL_CreateSemaphore(0);
+    state->sema_finish_render = SDL_CreateSemaphore(0);
+    assert(state->sema_start_render != NULL);
+    assert(state->sema_finish_render != NULL);
     state->num_workers = NUM_WORKER_THREADS;
-    state->worker_threads = malloc(sizeof(pthread_t)*state->num_workers);
-    state->worker_pixel_ranges = malloc(sizeof(int)*4*state->num_workers);
-    graphics_worker_arg *worker_args = malloc(sizeof(graphics_worker_arg)*state->num_workers);
+    state->worker_threads = (SDL_Thread**)
+        malloc(sizeof(SDL_Thread*)*state->num_workers);
+    state->worker_pixel_ranges = (int*)
+        malloc(sizeof(int)*4*state->num_workers);
+    graphics_worker_arg *worker_args = (graphics_worker_arg*)
+        malloc(sizeof(graphics_worker_arg)*state->num_workers);
     
     int i;
     for(i = 0; i < state->num_workers; i++){
@@ -339,7 +339,8 @@ int init_worker_threads(graphics_state *state){
         state->worker_pixel_ranges[i*4 + 2] = (i+1)*state->width/state->num_workers;
         state->worker_pixel_ranges[i*4 + 3] = state->height;
         worker_args[i] = (graphics_worker_arg){i, state};
-        if(pthread_create(state->worker_threads + i, NULL, (void*(*)(void*))graphics_worker_thread, &worker_args[i]) != 0){
+        state->worker_threads[i] = SDL_CreateThread((int(*)(void*))graphics_worker_thread, worker_args+i);
+        if(state->worker_threads[i] == NULL){
             perror("could not create worker thread");
             return -1;
         }
@@ -421,6 +422,10 @@ void timestep(graphics_state *state){
     }
 }
 
+static inline long now(){
+    return SDL_GetTicks()*1000000;
+}
+
 int main(int argc, char **argv){
 
     /* initialize sdl */
@@ -450,8 +455,8 @@ int main(int argc, char **argv){
     /* main loop */
     int run = 1;
     float ema_nanos = 0, ema_nanos2 = 0, max_nanos = 0;
-    struct timespec start_time, end_time;
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
+    long start_time;
+    start_time = now();
     while(run){
 
         /* change the scene */
@@ -465,8 +470,7 @@ int main(int argc, char **argv){
 
         /* performance metrics */
         state.frame++;
-        clock_gettime(CLOCK_MONOTONIC, &end_time);
-        long nanos = total_ns(&end_time) - total_ns(&start_time);
+        long nanos = now()-start_time;
         ema_nanos = 0.9f*ema_nanos + 0.1*nanos;
         ema_nanos2 = 0.9f*ema_nanos2 + 0.1*nanos*nanos;
         if(nanos > max_nanos) max_nanos = nanos;
@@ -479,7 +483,7 @@ int main(int argc, char **argv){
                 fps, fps-fps_sigma, fps_worst);
             max_nanos = 0;
         }
-        clock_gettime(CLOCK_MONOTONIC, &start_time);
+        start_time = now();
         int sleep_us = TARGET_US - nanos/1000;
         if(sleep_us > 0)
             usleep(sleep_us);
