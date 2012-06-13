@@ -9,12 +9,12 @@
 #include "geometry.h"
 
 /* screen dimensions to resize to when exiting */
-#define ORIG_WIDTH 1360
-#define ORIG_HEIGHT 920
+#define ORIG_WIDTH 540
+#define ORIG_HEIGHT 480
 
 /* screen dimensions to run at */
-#define WIDTH 640
-#define HEIGHT 480
+#define WIDTH 1200
+#define HEIGHT 800
 #define BPP 4
 
 /* scene description. for now, just balls that bounce around.
@@ -25,7 +25,7 @@
 /* rendering properties */
 #define TARGET_US 16666 /* 16.6 ms / frame = 60 fps */
 #define ANTIALIASING 4 /* 4 rays per pixel */
-#define NUM_WORKER_THREADS 4 /* increase to 4 on a quad core */
+#define NUM_WORKER_THREADS 24 /* increase to 4 on a quad core */
 #define MAX_TRACE_DEPTH 2 /* reflections, but no reflections of reflections */
 
 typedef struct light {
@@ -187,26 +187,23 @@ f3 graphics_render_pixel(graphics_state *state, int x, int y){
 
 int graphics_worker_thread(graphics_worker_arg *arg){
     graphics_state *state = arg->state;
-    int x0 = state->worker_pixel_ranges[4*arg->i];
-    int y0 = state->worker_pixel_ranges[4*arg->i + 1];
-    int x1 = state->worker_pixel_ranges[4*arg->i + 2];
-    int y1 = state->worker_pixel_ranges[4*arg->i + 3];
+    int i = arg->i;
+    //int x0 = state->worker_pixel_ranges[4*i];
+    //int y0 = state->worker_pixel_ranges[4*i + 1];
+    //int x1 = state->worker_pixel_ranges[4*i + 2];
+    //int y1 = state->worker_pixel_ranges[4*i + 3];
 
     /* raytrace */
     while(1){
         SDL_SemWait(state->sema_start_render);
 
         int x, y;
-        for(y = y0; y < y1; y++) 
+        for(y = 0; y < state->height; y++) 
         {
             int ytimesw = y * state->width;
-            for(x = x0; x < x1; x++) 
+            for(x = 0; x < state->width; x++) 
             {
-                if(!state->stencil[x + ytimesw]){
-                    set_pixel(state, x, ytimesw, 0, 0, 0);
-                    continue;
-                }
-
+                if(state->stencil[x + ytimesw] != (i+1)) continue;
                 f3 color = graphics_render_pixel(state, x, y);
                 set_pixel(state, x, ytimesw, 
                     (Uint8)(color.x*255.9f),
@@ -236,10 +233,15 @@ void add_sphere_to_stencil(sphere *s, graphics_state *state){
     if(y0 < 0) y0 = 0;
     if(y1 >= state->height) y1 = state->height - 1;
 
-    int x,y;
-    for(y = y0; y <= y1; y++)
-        for(x = x0; x <= x1; x++)
-            state->stencil[x + y*state->width] = 1;
+    int x,y,worker_ix=1;
+    for(y = y0; y <= y1; y++){
+        for(x = x0; x <= x1; x++){
+            state->stencil[x + y*state->width] = worker_ix++;
+            if(worker_ix > state->num_workers){
+                worker_ix = 1;
+            }
+        }
+    }
 }
 
 int draw_screen(graphics_state *state){
@@ -252,6 +254,15 @@ int draw_screen(graphics_state *state){
     int i;
     for(i = 0; i < state->object_count; i++){
         add_sphere_to_stencil(state->object_list + i, state);
+    }
+    int x,y;
+    for(y = 0; y < state->height; y++){
+        for(x = 0; x < state->width; x++){
+            int ytimesw = y*state->width;
+            if(state->stencil[x+ytimesw]==0){
+                set_pixel(state, x, ytimesw, 0,0,0);
+            }
+        }
     }
 
     /* tell the worker threads to start rendering, then wait for them to finish */
