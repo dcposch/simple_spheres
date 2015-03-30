@@ -63,7 +63,7 @@ Java is much more similar to C than Haskell is, so the Java port is almost line-
 A few lessons for me:
 
 - Java's graphics libraries were written by pedantic neckbeards with a weird fetish for classes and inheritance. Even getting a super-basic app that just draws a pulsating square (no raytracing at all) at 60fps required a lot of java.awt hackery. Basically all the efaults are wrong.
-- By default, Java's BufferedImage is insanely slow. I had to resort to some almost-but-not-quite portable hacks. This is partly because of "ColorModel", Java likes to do full color-space transformations on every pixel that you set. How many pro photo editing apps are actually written in Java? None. How many Java graphics apps are slow and crappy because of it? Lots.
+- By default, Java's BufferedImage is insanely slow. I had to resort to some almost-but-not-quite portable hacks. This is partly because of "ColorModel", Java likes to do full color-space transformations on every pixel that you set. How many pro photo editing apps are written in Java, benefitting from the built in color-space transformation? None. How many Java graphics apps are slow and crappy because of it? Lots.
 - Java doesn't support floats very well. Not only are functions like sqrt and sin not overloaded, but there's no sinf / sqrtf either.
 
 **7 FPS** on my machine.
