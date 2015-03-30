@@ -23,10 +23,7 @@ In the future, I want to experiment with a more general form
 of this: I want to use OpenGL to render a scene up the the
 fragment stage, and then go through the fragments, tracing 
 secondary rays from only the (usually small) subset that are
-highly specular. I am wondering whether this can be implemented
-directly on the GPU as a shader. 
-
-Simple_spheres is fairly badass.
+highly specular.
 
 **60 FPS** on my machine.
 
